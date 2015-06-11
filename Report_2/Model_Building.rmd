@@ -1,0 +1,430 @@
+---
+title: "Energy Consumption Model (Mark1)"
+author: "Mavez"
+date: "2 June 2015"
+output: html_document
+runtime: shiny
+---
+Model Building for the Classroom/Administration departments.
+caData represents the combined file version for building and weather csv file information merged by timestamp.
+
+
+### 1. Data Cleaning 
+```{r, echo=FALSE}
+caData <- read.csv("Classroom_Admin.csv")
+str(caData)
+head(caData)
+```
+
+Dividing the datset into training and test set 80% - 20% respectively
+
+```{r, echo=FALSE}
+caDataTraining <- read.csv("CA_DataTraining.csv")
+caDataTest <- read.csv("CA_DataTest.csv")
+```
+
+#### Test for Independence variables
+```{r,echo=FALSE}
+tbl <- table(caDataTraining$value,caDataTraining$HDD) 
+chisq.test(tbl)
+tbl_1 <- table(caDataTraining$value,caDataTraining$MeanDew.PointF) 
+chisq.test(tbl_1)
+tbl_2 <- table(caDataTraining$value,caDataTraining$Mean.Humidity) 
+chisq.test(tbl_2)
+tbl_3 <- table(caDataTraining$value,caDataTraining$Mean.Wind.SpeedMPH)
+chisq.test(tbl_3)
+```
+As the p-value are greater than the .05 significance level, 
+we do not reject the null hypothesis.
+
+Proves that the varibales are independent and thus we can proceed on with the next step.
+
+#### Preprocessing of the data
+Scaling the predicatable variables along with the mean.
+```{r}
+#-Training-
+caDataTraining$MeanDew.PointF <- scale(caDataTraining$MeanDew.PointF,center = TRUE,scale = TRUE)
+caDataTraining$Mean.Humidity <- scale(caDataTraining$Mean.Humidity,center = TRUE,scale = TRUE)
+caDataTraining$Mean.Wind.SpeedMPH <- scale(caDataTraining$Mean.Wind.SpeedMPH,center = TRUE,scale = TRUE)
+#-Test-
+caDataTest$MeanDew.PointF <- scale(caDataTest$MeanDew.PointF,center = TRUE,scale = TRUE)
+caDataTest$Mean.Humidity <- scale(caDataTest$Mean.Humidity,center = TRUE,scale = TRUE)
+caDataTest$Mean.Wind.SpeedMPH <- scale(caDataTest$Mean.Wind.SpeedMPH,center = TRUE,scale = TRUE)
+
+```
+
+```{r,echo=FALSE}
+head(caDataTraining)
+head(caDataTest)
+```
+
+### 2. Exploratory of Data
+Meter values should be random and normally distributed if we are attempting to fit linear model.
+
+#### Histograms for all the variables
+1. Meter Values
+Installing shiny(R Package) for representing interactive graphs
+```{r,echo=TRUE}
+library(shiny)
+```
+
+```{r,echo=FALSE}
+library(shiny)
+inputPanel(
+  selectInput("n_breaks",label = "Number of bin:",
+              choices = c(10,20,30),selected = 20),
+  sliderInput("bw_adjust",label = "Bandwidth Adjustmnet:",
+              min = 0.2,max = 2,value = 1,step = 0.2)
+)
+
+renderPlot({
+  hist(caDataTraining$value,xlab = "Meter Value",breaks = as.numeric(input$n_breaks), main = "Histogram Meter Value",col = "red")
+  
+  dens <- density(caDataTraining$value,adjust = input$bw_adjust)
+  lines(dens, col = "red")
+})
+```
+
+Thus we can see that meter values are not normally distributed values are more skewed toward left.
+
+##### We can perform transformation on meter values
+1.1 Attempting with log transformation on meter value.
+```{r,echo=FALSE}
+inputPanel(
+  selectInput("n_breaks_1",label = "Number of bin:",
+              choices = c(10,50,60),selected = 10),
+  sliderInput("bw_adjust",label = "Bandwidth Adjustmnet:",
+              min = 5,max = 10,value = 7,step = 0.2)
+)
+
+renderPlot({
+  
+  hist(log(caDataTraining$value),xlab = "Meter Value",breaks = as.numeric(input$n_breaks_1),
+     main = "Histogram Meter Value",col = "red")
+  
+  dens <- density(caDataTraining$value,adjust = input$bw_adjust)
+  lines(dens, col = "red")
+})
+```
+
+1.2 We can optimize the meter values using the optimiz finction
+```{r,echo=TRUE}
+
+caDataTraining$Value.Transformed <- log(caDataTraining$value + 19.99993)
+```
+
+```{r,echo=FALSE}
+inputPanel(
+  selectInput("n_breaks_2",label = "Number of bin:",
+              choices = c(10,20,30),selected = 15),
+  sliderInput("bw_adjust",label = "Bandwidth Adjustmnet:",
+              min = 5,max = 10,value = 7,step = 0.2)
+)
+
+renderPlot({
+  hist(caDataTraining$Value.Transformed,xlab = "Meter Value",breaks = as.numeric(input$n_breaks_2),
+     main = "Histogram Meter Value",col = "red")
+  
+  dens <- density(caDataTraining$value,adjust = input$bw_adjust)
+  lines(dens, col = "red")
+})
+```
+
+2. HDD Heating Degree Days
+
+```{r,echo=FALSE}
+caDataTraining$HDD.Transformed <- log(caDataTraining$HDD + 19.99993)
+
+hist(caDataTraining$HDD.Transformed, xlab = "Heating Degree Days",breaks = 10,
+     main = "Histogram Heating Degree Days",col = "blue")
+```
+
+3. Mean dew point
+```{r,echo=FALSE}
+hist(caDataTraining$MeanDew.PointF,xlab = "Mean Dew Point",breaks = 10,
+     main = "Histogram Mean Dew Point",col = "lightgreen")
+```
+
+
+4. Mean Humidity
+```{r,echo=FALSE}
+hist(caDataTraining$Mean.Humidity,xlab = "Mean Humidity",breaks = 10,
+     main = "Histogram Mean Humidity",col = "lightgrey")
+```
+
+
+5. Mean Wind Speed
+```{r,echo=FALSE}
+
+inputPanel(
+  selectInput("n_breaks_3",label = "Number of bin:",
+              choices = c(10,20,30),selected = 15),
+  sliderInput("bw_adjust",label = "Bandwidth Adjustmnet:",
+              min = 5,max = 10,value = 7,step = 0.2)
+)
+
+renderPlot({
+  hist(caDataTraining$Mean.Wind.SpeedMPH,xlab = "Mean Wind Speed",breaks = as.numeric(input$n_breaks_3),
+     main = "Mean Wind Speed",col = "lightskyblue")
+  
+  dens <- density(caDataTraining$value,adjust = input$bw_adjust)
+  lines(dens, col = "red")
+})
+
+```
+
+With this we can see the evidence of the variables with normally distributed and independent.
+
+#### Boxplots
+
+1. Meter Values
+```{r,echo=TRUE}
+boxplot(caDataTraining$Value.Transformed,outline.col=NA)
+summary(caDataTraining$value)
+```
+
+This indicates that we have outliers but we cant just simply eliminate them. Work needs to be done to get the outliers eliminated.
+
+2. Heating Degree Days
+```{r,echo=FALSE}
+boxplot(caDataTraining$HDD.Transformed)
+```
+3. Mean dew point
+```{r,echo=FALSE}
+boxplot(caDataTraining$MeanDew.PointF)
+```
+
+4. Mean Humidity
+```{r,echo=FALSE}
+boxplot(caDataTraining$Mean.Humidity)
+```
+
+5. Mean Wind Speed
+```{r,echo=FALSE}
+boxplot(caDataTraining$Mean.Wind.SpeedMPH)
+```
+
+
+#### xyPlots
+
+Analysing the Meter value depending on the Events and Days.
+
+```{r,echo=TRUE}
+library(lattice)
+xyplot(caDataTraining$Value.Transformed ~ caDataTraining$HDD.Transformed | factor(caDataTraining$Events))
+xyplot(caDataTraining$Value.Transformed ~ caDataTraining$HDD.Transformed | factor(caDataTraining$Days))
+```
+
+
+### 3. Variable Selection
+
+Now we work on the model selection method.
+- Looking at the datacolumns
+- Creating a new dataframe and thus with the predictable variables which are required.
+```{r,echo=FALSE}
+colnames(caDataTraining)
+```
+
+#### Approach
+##### 1. No Categorical Variables
+- In this model building phase we are trying the use all the predictable variables except the categorical variables as events and days.
+- We will be working on training set and test set simultaneously.
+
+```{r,echo=FALSE}
+library(dplyr)
+#caModelTraining <- select(caDataTraining,-1,-2,-3,-8,-9)  
+caModelTraining <-  select(caDataTraining,12,11,4:7,9) 
+caModelTest <-  select(caDataTest,-1,-2,-3,-8) 
+head(caModelTest)
+```
+
+##### 1.1 Best subset selection method
+
+
+```{r,echo=TRUE}
+library(leaps)
+```
+
+```{r,echo=TRUE}
+
+formula <- Value.Transformed ~ HDD.Transformed + MeanDew.PointF + Mean.Humidity + Mean.Wind.SpeedMPH
+regfit.full <- regsubsets(formula, data = caModelTraining)
+regfit.full.summary <- summary(regfit.full)
+regfit.full.summary
+```
+
+Looking at the Adjusted Rsquare, AIC, BIC, Cp values for each model selected.
+
+```{r,echo=TRUE}
+regfit.full.summary$rsq
+regfit.full.summary$adjr2
+regfit.full.summary$cp
+regfit.full.summary$bic
+```
+
+Plotting extracted values from the fitted model
+
+```{r,echo=TRUE}
+# PLot Adjr2
+plot(regfit.full.summary$adjr2,xlab = "Number of Varibles",
+     ylab = "Adjr2", type = "l")
+which.max(regfit.full.summary$adjr2)
+points(3,regfit.full.summary$adjr2[3],col = "red", cex = 2, pch = 20)
+
+# PLot Cp
+plot(regfit.full.summary$cp,xlab = "Number of Varibles",
+     ylab = "Cp", type = "l")
+which.min(regfit.full.summary$cp)
+points(3,regfit.full.summary$cp[3],col = "red", cex = 2, pch = 20)
+
+# PLot BIC
+plot(regfit.full.summary$bic,xlab = "Number of Varibles",
+     ylab = "BIC", type = "l")
+which.min(regfit.full.summary$bic)
+points(1,regfit.full.summary$bic[1],col = "red", cex = 2, pch = 20)
+
+```
+
+Model with the predictable variables and coefficient is best according to the best subset selection method.
+
+```{r,echo=FALSE}
+coef(regfit.full,3)
+```
+
+
+##### 1.2 Forward and backward stepwise selection method.
+
+Implementing the forward and backward stepwise selection method.
+
+- 1.2.1 Forward Stepwise Selection
+
+```{r,echo=TRUE}
+regfit.fwd <- regsubsets(formula, data = caModelTraining,nvmax = 19,
+                         method = "forward")
+regfit.fwd.summary <- summary(regfit.fwd)
+regfit.fwd.summary
+```
+
+Finding the values corresponding to the Adjr2, Cp and BIC.
+
+```{r,echo=TRUE}
+which.max(regfit.fwd.summary$adjr2)
+which.max(regfit.fwd.summary$cp)
+which.max(regfit.fwd.summary$bic)
+```
+
+Model with the predictable variables and coefficient is best according to the forward stepwise selection method.
+
+```{r,echo=TRUE}
+coef(regfit.fwd,4)
+```
+
+- 1.2.2 Backward Stepwise Selection
+
+```{r,echo=TRUE}
+regfit.bwk <- regsubsets(formula, data = caModelTraining,nvmax = 19,
+                         method = "backward")
+regfit.bwk.summary <- summary(regfit.bwk)
+regfit.bwk.summary
+
+```
+
+Finding the values corresponding to the Adjr2, Cp and BIC.
+
+```{r,echo=TRUE}
+
+which.max(regfit.bwk.summary$adjr2)
+which.max(regfit.bwk.summary$cp)
+which.max(regfit.bwk.summary$bic)
+
+```
+
+Model with the predictable variables and coefficient is best according to the backward stepwise selection method.
+
+
+```{r,echo=TRUE}
+coef(regfit.bwk,4)
+```
+
+### 4. Model Building using TREES
+
+#### 4.1 Trees
+
+```{r}
+library(party)
+formula_1 <- Value.Transformed ~ HDD.Transformed + MeanDew.PointF + Mean.Humidity
+fit_tree <- ctree(formula = formula_1, data = caModelTraining)
+fit_tree
+```
+
+#### 4.2 Rpart
+
+```{r}
+library(rpart)
+fit_rpart <- rpart(formula = formula_1,data = caModelTraining)
+fit_rpart
+```
+
+
+
+#### 4.3 Random Forest
+
+Thus model method turned out to be a good model prediction model
+
+```{r}
+library(randomForest)
+fit_rforest <- randomForest(formula = formula_1,data = caModelTraining)
+fit_rforest
+plot(fit_rforest)
+```
+
+Plotting the individual coefficients
+
+```{r}
+print(fit_rforest)
+importance(fit_rforest)
+plot( importance(fit_rforest), lty=2, pch=16)
+lines(importance(fit_rforest))
+```
+
+
+### 5. Predicting values using Random Forest Model
+```{r}
+#predict_rforest <- predict(fit_rforest,caModelTest,type = "response")
+#randomForest.predict <- predict_rforest
+
+```
+##### > head(randomForest.predict)
+#####   5.844419  5.466006  5.796589  5.623734  5.623734  5.741708 
+##### > head(caModelTest$Value.Transformed)
+#####   6.036419  5.255994  3.975710  4.944523  6.113054  6.452535
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
